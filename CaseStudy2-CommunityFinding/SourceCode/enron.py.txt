@@ -1,0 +1,115 @@
+import numpy
+import networkx as nx
+
+
+
+import pcd.cmty
+import pcd.cmtycmp
+import pcd.support.algorithms as algs
+import pcd.support.matplotlibutil as mplutil
+
+
+def iteredges():
+    f = open('enron/enron_temporal_1day_edges.txt')
+    for line in f:
+        a, b, w, t = line.split()
+        yield int(a), int(b), int(t), int(w)
+
+import tnetsql
+
+net = tnetsql.TNet('enron.sql')
+#net.add_edges(iteredges())
+
+print len(net)
+#print list(net[2])
+print list(net.t[799])
+
+
+
+class BuildUpNetwork(object):
+    def __init__(self):
+        pass
+
+    def getfirst(self, dt):
+        es1 = net.t[self.tstart: self.tstart+dt]
+        es1 = tuple((a,b) for a,b,t,w in es1)
+        es2 = net.t[self.tstart+dt: self.tstart+2*dt]
+        es2 = tuple((a,b) for a,b,t,w in es2)
+        return es1, es2
+    def getnext(self, dt):
+        edges = net.t[self.tstart: self.tstart+dt]
+        edges = tuple((a,b) for a,b,t,w in edges)
+        #g = nx.Graph()
+        #g.add_edges_from(edges)
+        return edges
+
+def main():
+
+    nnet = BuildUpNetwork()
+
+    from pcd.util import AutoAverager
+    avgr = AutoAverager(depth=2)
+
+    for tstart in range(1000, 1201, 100):
+
+        nnet.tstart = tstart
+
+        for dt in range(1, 100+1, 1):
+            es1, es2 = nnet.getfirst(dt)
+
+            if len(es1) == 0 or len(es2) == 0:
+                continue
+            es1s = set(es1)
+            es2s = set(es2)
+            den = float(len(es1s | es2s))
+            if den == 0:
+                x = float('nan')
+            else:
+                x = len(es1s & es2s) / den
+            avgr[dt]['es-jacc'].add(x)
+            avgr[dt]['n_edges'].add(len(es1s))
+            avgr[dt]['n_edges'].add(len(es2s))
+
+            g1 = nx.Graph(x for x in es1)
+            g2 = nx.Graph(x for x in es2)
+            g1lcc = g1.subgraph(nx.connected_components(g1)[0])
+            g2lcc = g2.subgraph(nx.connected_components(g2)[0])
+
+            avgr[dt]['LCC-frac'].add(len(g1lcc)/float(len(g1)))
+            avgr[dt]['LCC-frac'].add(len(g2lcc)/float(len(g2)))
+
+            cdargs = dict(verbosity=0)
+            c1 = algs.Louvain(g1lcc, **cdargs).cmtys
+            c2 = algs.Louvain(g2lcc, **cdargs).cmtys
+            c1, c2 = pcd.cmtycmp.limit_to_overlap(c1, c2)
+            nmi = pcd.cmtycmp.nmi(c1, c2)
+            avgr[dt]['nmi'].add(nmi)
+
+            print dt, x
+
+
+
+
+    ax, extra = mplutil.get_axes('aaa.png')
+    ax.set_xlabel('dt')
+    ax.set_ylabel('normalized values (actual min/max in legend)')
+
+    ts = list(avgr.names)
+    for name in avgr.column_names(): #('es-jacc', 'n_edges', 'nmi'):
+        x = numpy.asarray(avgr.column(name))
+        xmax = numpy.max(x)
+        xmin = numpy.min(x)
+        xnorm = (x - xmin) / float(xmax-xmin)
+        xstd = numpy.asarray(avgr.column(name, 'std'))
+        xstdnorm = xstd / float(xmax-xmin)
+        print xmin, xmax
+        ax.errorbar(ts, xnorm, yerr=xstdnorm,
+                    label="%s (%.2g-%.2g)"%(name, xmin, xmax))
+
+    #ax.legend(loc='center left', bbox_to_anchor=(1.00, .5))
+    ax.legend(loc='upper center', bbox_to_anchor=(.5, -0.05))
+    mplutil.save_axes(ax, extra)
+
+
+if __name__ == "__main__":
+    main() 
