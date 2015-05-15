@@ -1,0 +1,6 @@
+Calculating CF with TOP N for k = 20
+
+
+TO DATE : 
+	 Total Trans 		 MAE 
+	--------------------------------------------------- 
